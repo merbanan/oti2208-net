@@ -1,0 +1,41 @@
+From: Benjamin Larsson <banan@ludd.ltu.se>
+Subject: [PATCH] usb-storage: ignore the OTi-2208 USB host-to-host cable
+
+The OTi-2208 "EasySuite USB Host-to-Host Data Bridge" (0ea0:2108) presents
+each cable end as a Bulk-Only mass-storage device with a single CD-ROM LUN
+that holds the vendor's Windows software. The data link itself is driven by
+vendor SCSI commands over the same interface and is handled by the
+oti2208_net network driver, which speaks Bulk-Only Transport itself.
+
+Let usb-storage ignore the device so oti2208_net can bind to it. The entry
+is limited to bcdDevice 0x0100, the revision of the 2208 cables tested;
+older OTi-2108 cables share the USB ID.
+
+Signed-off-by: Benjamin Larsson <banan@ludd.ltu.se>
+---
+ drivers/usb/storage/unusual_devs.h | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/usb/storage/unusual_devs.h b/drivers/usb/storage/unusual_devs.h
+--- a/drivers/usb/storage/unusual_devs.h
++++ b/drivers/usb/storage/unusual_devs.h
+@@ -1618,6 +1618,17 @@
+ 		US_FL_FIX_INQUIRY ),
+ 
+ /*
++ * OTi-2208 USB host-to-host cable ("EasySuite USB Host-to-Host Data Bridge").
++ * Each end shows up as a CD-ROM holding the Windows software; the data link
++ * itself is driven by vendor SCSI commands and handled by oti2208_net.
++ */
++UNUSUAL_DEV(0x0ea0, 0x2108, 0x0100, 0x0100,
++		"OTi",
++		"OTi-2208 Data Bridge",
++		USB_SC_DEVICE, USB_PR_DEVICE, NULL,
++		US_FL_IGNORE_DEVICE),
++
++/*
+  * Submitted by Daniel Drake <dsd@gentoo.org>
+  * Reported by dayul on the Gentoo Forums
+  */
+-- 
+2.43.0

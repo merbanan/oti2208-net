@@ -26,7 +26,7 @@
  *    after ~7 ms; a write nobody reads fails with 09/85 after ~1.3 s;
  *  - every D9 transfer must be exactly 64 KiB (shorter ones hang the chip);
  *  - D9 28 CDB[2] is the idle wait in 5 ms units (+~8 ms).
- * So the data loop takes turns. A sender sends up to `burst` blocks back to
+ * So the data loop takes turns. A sender sends up to OTI_BURST blocks back to
  * back, flagging OTI_BF_MORE while more follow. The receiver keeps reading while
  * it sees OTI_BF_MORE and starts its own turn when the flag is clear.
  *
@@ -55,21 +55,14 @@
 #define OTI_CMD_TIMEOUT_MS		5000
 #define OTI_MAX_MTU		9000
 
-static unsigned int rx_wait = 2;
-module_param(rx_wait, uint, 0644);
-MODULE_PARM_DESC(rx_wait, "D9 28 idle wait, 5 ms units (default 2; 0 measured ~40% slower)");
-
-static unsigned int burst = 32;
-module_param(burst, uint, 0644);
-MODULE_PARM_DESC(burst, "max blocks per turn before the peer may send (default 32)");
-
-static unsigned int rx_streak = 64;
-module_param(rx_streak, uint, 0644);
-MODULE_PARM_DESC(rx_streak, "max reads in a row while the peer says 'more' (default 64)");
-
-static unsigned int max_retries = 50;
-module_param(max_retries, uint, 0644);
-MODULE_PARM_DESC(max_retries, "write retries before a block is dropped (default 50)");
+/* D9 28 idle wait in 5 ms units; 2 measured best, 0 is ~40 % slower */
+#define OTI_RX_WAIT		2
+/* max blocks per turn before the peer may send */
+#define OTI_BURST		32
+/* max reads in a row while the peer says "more" */
+#define OTI_RX_STREAK		64
+/* write retries (refused or busy) before a block is dropped */
+#define OTI_MAX_RETRIES		50
 
 /* ---- Bulk-Only Transport ---- */
 
@@ -384,7 +377,7 @@ static int oti_read_block(struct oti *o, struct oti_res *r)
 	u8 cdb[16];
 
 	vcdb(cdb, 0xd9, 0x28);
-	cdb[2] = min_t(unsigned int, rx_wait, 255);
+	cdb[2] = OTI_RX_WAIT;
 	put_unaligned_be32(o->rseq++, cdb + 5);
 	return oti_bot(o, cdb, 16, true, o->rxblk, OTI_BLOCK_SIZE, OTI_CMD_TIMEOUT_MS, r, true);
 }
@@ -513,7 +506,7 @@ static int oti_thread(void *arg)
 
 			tx_nframes = oti_pack(o, &tx_used, &tx_bytes, &more);
 			if (tx_nframes) {
-				sent_more = more && writes_since_read + 1 < burst;
+				sent_more = more && writes_since_read + 1 < OTI_BURST;
 				blk_finish(o->txblk, tx_seq, tx_nframes, tx_used,
 					   sent_more ? OTI_BF_MORE : 0);
 				tx_pending = true;
@@ -523,7 +516,7 @@ static int oti_thread(void *arg)
 
 		if (tx_pending && tx_backoff) {
 			tx_backoff--;
-		} else if (tx_pending && !(peer_more && streak < rx_streak)) {
+		} else if (tx_pending && !(peer_more && streak < OTI_RX_STREAK)) {
 			streak = 0;
 			oti_write_block(o, &r);
 			if (r.err && fatal_err(r.err))
@@ -543,18 +536,18 @@ static int oti_thread(void *arg)
 			case D_COLLIDE:
 				/* the peer's block holds the slot: read it, then retry */
 				o->collisions++;
-				drop = ++tx_retries > max_retries;
+				drop = ++tx_retries > OTI_MAX_RETRIES;
 				break;
 			case D_NOREAD:
 				o->noread++;
 				tx_backoff = 1 + get_random_u32_below(3);
-				drop = ++tx_retries > max_retries;
+				drop = ++tx_retries > OTI_MAX_RETRIES;
 				break;
 			case D_BUSY:
 			case D_RESYNC:
 			case D_IDLE:
 			case D_CHECK:
-				drop = ++tx_retries > max_retries;
+				drop = ++tx_retries > OTI_MAX_RETRIES;
 				break;
 			case D_OFFLINE:
 				oti_set_online(o, false);
@@ -565,7 +558,7 @@ static int oti_thread(void *arg)
 				break;
 			case D_ERROR:
 				consec_err++;
-				drop = ++tx_retries > max_retries;
+				drop = ++tx_retries > OTI_MAX_RETRIES;
 				break;
 			}
 			if (drop) {

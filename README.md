@@ -42,16 +42,12 @@ run `nmcli device set <if> managed no`.
 
 Do the same on the other PC, then configure IP addresses as for any Ethernet link.
 
-## Module parameters
+## Tuning
 
-| parameter | default | meaning |
-|---|---|---|
-| `rx_wait` | 2 | idle wait of a read, in 5 ms units. 2 measured best; 0 is ~40 % slower |
-| `burst` | 32 | max 64 KiB blocks per turn before the other end may send. 16 = lower latency under load, ~3 % slower |
-| `rx_streak` | 64 | safety cap: reads in a row while the other end says "more" |
-| `max_retries` | 50 | write retries before a block is dropped |
-
-They are writable at runtime under `/sys/module/oti2208_net/parameters/`.
+The driver has no module parameters. The loop constants (`OTI_RX_WAIT` 2,
+`OTI_BURST` 32, `OTI_RX_STREAK` 64, `OTI_MAX_RETRIES` 50) are `#define`s at the
+top of `oti2208_net.c`; the values are the measured best and need no changing
+in normal use.
 
 ## How it works
 
@@ -76,7 +72,7 @@ They are writable at runtime under `/sys/module/oti2208_net/parameters/`.
   version, flags, payload length), repeated at the end of the block to catch torn blocks.
   It is followed by `[u16 len][frame]...`. There is no payload checksum: USB has a per-packet
   CRC-16 and TCP/IP have their own.
-* **Turn taking:** a sender sends up to `burst` blocks back to back and sets the "more" flag
+* **Turn taking:** a sender sends up to `OTI_BURST` blocks back to back and sets the "more" flag
   while more follow; the receiver keeps reading as long as it sees "more". After its burst a
   side reads, so the other end's turn starts at once. One kernel thread per interface runs
   this loop while the interface is up. Received frames go to threaded NAPI with GRO, so TCP
